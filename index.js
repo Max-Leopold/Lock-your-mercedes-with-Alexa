@@ -83,6 +83,7 @@ const LockMyMercedesHandler = {
      */
     async function fetchAccesToken(code) {
 
+      //Post command to exchange an authetification code for an access token
       var res = await fetch('https://api.secure.mercedes-benz.com/oidc10/auth/oauth/v2/token', {
         method: 'post',
         headers: {
@@ -93,17 +94,25 @@ const LockMyMercedesHandler = {
       }
       )
         
+      //Turn result into json format
       var result = await res.json();
       console.log(result);
         
+      //If there was an error with the given authentification code print that to the console and
+      //return a error message for Alexa
       if (result.error == 'invalid_grant') {
           console.log('The given authorization code was invalid or already used');
           return 'Sorry we couldnt connect to your car. Please lock your car by yourself'
         } else {
           console.log('The given grant is valid. Trying to connect to the car');
+          //Save the acess token and the refresh token from the result of the post request
           refresh_token = result['refresh_token'];
           access_token = result['access_token'];
-          //return 'Your car has been locked';
+          
+          //Check the door status of the vehicle. If unlocked, lock
+          //Wait for the result of the operation
+          //if true -> no problem with the car connection, all doors have been locked
+          //if false -> there was some sort of error while connecting with the car
           var locked = await checkDoorStatus();
           if(locked == true){
             return 'Your car has been locked.';
@@ -122,6 +131,7 @@ const LockMyMercedesHandler = {
      * If the value is UNLOCKED the vehicle is not completly locked.
      */
     async function checkDoorStatus() {
+      //Get command to get the door status of a vehicle 
       var res = await fetch('https://api.mercedes-benz.com/experimental/connectedvehicle/v1/vehicles/' + vehicle_id + '/doors', {
         method: 'get',
         headers: {
@@ -130,15 +140,18 @@ const LockMyMercedesHandler = {
         }
       })
         
+        //Turn the result into json format
         var result = await res.json();
         console.log(result);
-        //console.log(result);
+        //If the lock status of the vehicle is locked return true
         if (result.doorlockstatusvehicle.value == 'LOCKED') {
           console.log('All doors locked');
           locked = true;
           console.log('Locked? ' + locked);
           return true;
-        } else {
+        } 
+        //Else lock the doors
+        else {
           return await lockAllDoors();
         }
       }
@@ -151,6 +164,7 @@ const LockMyMercedesHandler = {
      * will also be returned by the lockAllDoors().
      */
     async function lockAllDoors() {
+      //Post command to lock all doors of a specific vehicle
       var res = await fetch('https://api.mercedes-benz.com/experimental/connectedvehicle/v1/vehicles/' + vehicle_id + '/doors', {
         method: 'post',
         headers: {
@@ -159,8 +173,9 @@ const LockMyMercedesHandler = {
         },
         body: '{ \"command\": \"LOCK\"}'
       })
-
+        //Parse the result to json format
         var result = await res.json();
+        //To verify, that all doors are locked, check the door status
         return await checkDoorStatus();
       }
     
@@ -192,6 +207,7 @@ const LockMyMercedesHandler = {
     //Communication with the mercedes API
     //End
 
+    //Return the speechOutput for Alexa, based on the result of the lock door functions
     return handlerInput.responseBuilder
       .speak(speechOutput)
       .getResponse();
