@@ -20,48 +20,33 @@ const LockMyMercedesHandler = {
   },
   async handle(handlerInput) {
 
-    //Communication with the mercedes API
-    //Start
+    //Communication with mercedes API
+    //start
+
+    //Look for accessToken object in json Input
+    //If there is no accessToken -> user has to login first
+    //If there is a accessToken -> lock his car
+    const { accessToken } = handlerInput.requestEnvelope.context.System.user;
+    console.log(accessToken);
+
+
+    if(!accessToken) {
+      const speechOutput = 'You must first login to your mercedes account';
+
+      //Let the user login with his mercedes account
+      return handlerInput.responseBuilder
+        .speak(speechOutput)
+        .withLinkAccountCard()
+        .getResponse();
+    } else {
+
+    //Extract the access token from the json input
+    var access_token = handlerInput.requestEnvelope.context.System.user.accessToken;
     
-    //=======================================================
-    // Plase provide the variables in this paragraph
-    //=======================================================
-    /**
-    * You can get your vehicle_id by visiting the car simulator:
-    * https://car-simulator.developer.mercedes-benz.com/
-    * You can find your vehicle id in the top left corner
-    * */
-    var vehicle_id = '9CE2C8302183ADBD1A';
-    
-    /**
-    * You can obtain the authorization code, by visiting this website:
-    * https://api.secure.mercedes-benz.com/oidc10/auth/oauth/v2/authorize?response_type=code&client_id=6f50c8c8-d8c2-4f21-b228-dc5f70197047&redirect_uri=http://localhost&scope=mb:vehicle:status:general mb:user:pool:reader
-    * You will have to log in to your mercedes developer account
-    * You will get redirected to url, following this scheme:
-    * http://localhost/?code=9217fd84-2600-4c1f-acfe-88a8f16d2f24
-    * Please set the variable authorization_code to the part of the url following ?code=
-    * You will have to provide this Varibale new every time you run the application
-    * */
-    var authorization_code = 'fcbaf99f-d897-439d-89a3-f109f089ca0b';
-
-    //=======================================================
-    // End
-    //=======================================================
-
-    /**
-     * Client id and Client secret of the application.
-     * These two keys should normally be held secret and should only be known by the authentification server
-     * and the application backend, but since I didnt programmed a backend 
-     * to save these two in, they are stored as variables in the programm.
-     */
-    const client_id = "6f50c8c8-d8c2-4f21-b228-dc5f70197047";
-    const client_secret = "b6f1a42d-1ac6-419f-9112-ce8a7f717d7c";
-
-    //The client id and client sercret must be encoded in base64 to fetch an access token
-    const encoded_all = Buffer.from(client_id + ':' + client_secret).toString('base64');
-
-    var refresh_token; 
-    var access_token;
+    //Get the vehicle if via the access token
+    var vehicle_id = await getVehicleId();
+  
+    console.log(access_token);
 
     //This variable is used to store if your car is locked
     //false = unlocked
@@ -69,66 +54,48 @@ const LockMyMercedesHandler = {
     var locked = false;
 
     /**
-     * This function accepts an authetification code as parameter. This authetification code must be
-     * provided by the user using the software. This software cant fetch an authorization code on her own.
-     * 
-     * After requesting the access token from the server via the authentification code.
-     * When the authentification code was valid, the access token and refresh token are extracted from
-     * the result of the request.
-     * This acces token is then used to check if the doors of your car are locked via the checkDoorStatus() function.
-     * This function then return true (= locked) or false (= unlocked). Based on this the fetchAccessToken() function
-     * return a String which is used as Alexas speechOutput.
-     * 
-     * @param {authetification code} code 
+     * This function returns the vehicle id of a users car.
+     * The vehicle if is retrieved via the access token
      */
-    async function fetchAccesToken(code) {
-
-      //Post command to exchange an authetification code for an access token
-      var res = await fetch('https://api.secure.mercedes-benz.com/oidc10/auth/oauth/v2/token', {
-        method: 'post',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + encoded_all
-        },
-        body: 'grant_type=authorization_code&code=' + code + '&redirect_uri=http://localhost'
-      }
-      )
-        
-      //Turn result into json format
+    async function getVehicleId() {
+      //Fetch the vehicle id
+      var res = await fetch('https://api.mercedes-benz.com/experimental/connectedvehicle/v1/vehicles', {
+        method: 'get',
+        headers:{
+          'accept': 'application/json',
+          'Authorization': 'Bearer ' + access_token
+        }
+      });
+      //Convert the result to json
       var result = await res.json();
       console.log(result);
-        
-      //If there was an error with the given authentification code print that to the console and
-      //return a error message for Alexa
-      if (result.error == 'invalid_grant') {
-          console.log('The given authorization code was invalid or already used');
-          return 'Sorry we couldnt connect to your car. Please lock your car by yourself'
-        } else {
-          console.log('The given grant is valid. Trying to connect to the car');
-          //Save the acess token and the refresh token from the result of the post request
-          refresh_token = result['refresh_token'];
-          access_token = result['access_token'];
-          
-          //Check the door status of the vehicle. If unlocked, lock
-          //Wait for the result of the operation
-          //if true -> no problem with the car connection, all doors have been locked
-          //if false -> there was some sort of error while connecting with the car
-          var locked = await checkDoorStatus();
-          if(locked == true){
-            return 'Your car has been locked.';
-          }else {
-            return 'There was an error communicating with your car. Your car has not been locked.';
-          }
-        }
+      //return the vehicle id
+      return result[0]['id'];
     }
 
     /**
-     * Fetches the door status of the given vehicle.
-     * If the doors are all already locked the function return true to indicate that the doors are locked.
-     * If a minimum of one door is not locked the function calls the lockAllDoors() function to get all doors locked.
-     * To verify if a door is not locked the function analyzes the result of the fetch and checks for the 
-     * doolockstatusvehcle attribute of the json object. If the value of this attribute if LOCKED, then all doors are locked.
-     * If the value is UNLOCKED the vehicle is not completly locked.
+     * This function is the start function of the programm.
+     * This function gets called, to start the whole process of locking the doors of a car.
+     * The function calls the checkDoorStatus() function and waits for a boolean return.
+     * If the checkDoorStatus() function returns true, that means all doors are now locked.
+     * If the checkDoorStatus() function returns false, that means there was an error communicating with the API/car
+     */
+    async function start() {
+      //Check the status of the doors 
+      var locked = await checkDoorStatus();
+      if(locked == true){
+        return 'Your car has been locked.';
+      }else {
+        return 'There was an error communicating with your car. Your car has not been locked.';
+      }
+    }
+    
+    /**
+     * This function is used to check the door status of a vehicle.
+     * It checks the doorlockstatusvehicle value. This value indicates, if all doors of a vehicle are locked or if there
+     * is a minimum of one door not locked.
+     * When all doors are locked this function returns true.
+     * If a minimum of one door isnt locked, this function calls the lockAllDoors() function to lock the doors
      */
     async function checkDoorStatus() {
       //Get command to get the door status of a vehicle 
@@ -138,23 +105,22 @@ const LockMyMercedesHandler = {
           'accept': 'application/json',
           'Authorization': 'Bearer ' + access_token
         }
-      })
-        
-        //Turn the result into json format
-        var result = await res.json();
-        console.log(result);
-        //If the lock status of the vehicle is locked return true
-        if (result.doorlockstatusvehicle.value == 'LOCKED') {
-          console.log('All doors locked');
-          locked = true;
-          console.log('Locked? ' + locked);
-          return true;
-        } 
-        //Else lock the doors
-        else {
-          return await lockAllDoors();
-        }
+      });
+      //Turn the result into json format
+      var result = await res.json();
+      console.log(result);
+      //If the lock status of the vehicle is locked return true
+      if (result.doorlockstatusvehicle.value == 'LOCKED') {
+        console.log('All doors locked');
+        locked = true;
+        console.log('Locked? ' + locked);
+        return true;
+      } 
+      //Else lock the doors
+      else {
+        return await lockAllDoors();
       }
+    }
     
     /**
      * This function sends a post fetch to the vehicle to get lock all doors. 
@@ -172,46 +138,27 @@ const LockMyMercedesHandler = {
           'Authorization': 'Bearer ' + access_token
         },
         body: '{ \"command\": \"LOCK\"}'
-      })
-        //Parse the result to json format
-        var result = await res.json();
-        //To verify, that all doors are locked, check the door status
-        return await checkDoorStatus();
-      }
-    
-    /**
-     * This method is never used.
-     * 
-     * Idea of this function was to use a DynamoDB database to store a refresh token and dont
-     * fetch a ne acces token every time the intent gets triggered via the authorization code, but get 
-     * a new acces token via the refresh token that is saved in the DynamoDB database.
-     */
-    function refreshToken() {
-      console.log(refresh_token);
-      fetch('https://api.secure.mercedes-benz.com/oidc10/auth/oauth/v2/token', {
-        method: 'post',
-        headers: {
-          'Authorization': 'Basic ' + encoded_all,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: 'grant_type=refresh_token&refresh_token=' + refresh_token
-      }).then(res => res.json()).then(result => {
-        refresh_token = result['refreshToken'];
-        access_token = result['access_token'];
-      }).then(setTimeout(refreshToken, 3500000));
+      });
+      //Parse the result to json format
+      var result = await res.json();
+      //To verify, that all doors are locked, check the door status
+      return await checkDoorStatus();
     }
-
-    const speechOutput = await fetchAccesToken(authorization_code);
+    
+    //Starts the program
+    const speechOutput = await start();
+    
     console.log('response:' + speechOutput);
 
     //Communication with the mercedes API
     //End
 
-    //Return the speechOutput for Alexa, based on the result of the lock door functions
+    //Return the speechOutput for Alexa, based on the result of the start function
     return handlerInput.responseBuilder
       .speak(speechOutput)
       .getResponse();
-  },
+    }
+},
 };
 
 //=======================================================
@@ -266,8 +213,8 @@ const ErrorHandler = {
     console.log(`Error handled: ${error.message}`);
 
     return handlerInput.responseBuilder
-      .speak('Sorry, we coudnt connect with your car.')
-      .reprompt('Sorry, we coudnt connect with your car.')
+      .speak('Sorry, we coudnt connect with your car. Error')
+      .reprompt('Sorry, we coudnt connect with your car. Error')
       .getResponse();
   },
 };
